@@ -1,23 +1,27 @@
 """Regenerate emplacements.txt + meta.json from the SAP BI export.
 
-Reads the emplacement_depot.xlsx export dropped on the WMS network share and
-converts it to the compact pipe-delimited format the 3D map fetches at
-runtime. Run this whenever the source file changes (see the scheduled job
-that calls it every 1-2h).
+Reads the emplacement_depot_<id>.xlsx export dropped on the SAP BO network
+share and converts it to the compact pipe-delimited format the 3D map
+fetches at runtime. Once successfully processed, the source file is moved
+to a "processed" subfolder on the same share (not deleted) so it never gets
+reprocessed, while staying recoverable if something goes wrong downstream.
 """
-import hashlib
+import glob
 import json
 import os
+import shutil
 import sys
 from datetime import datetime, timezone
 
 import openpyxl
 
-SOURCE_PATH = r"\\WH-APP-WMS\usr_prio_encours$\emplacement_depot.xlsx"
+SOURCE_DIR = r"\\vm-apps-shares.babou.local\SAP_BO\EXPORTS\BLUEYONDER"
+SOURCE_GLOB = "emplacement_depot_*.xlsx"
+PROCESSED_DIR = os.path.join(SOURCE_DIR, "processed")
+
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_PATH = os.path.join(REPO_DIR, "emplacements.txt")
 META_PATH = os.path.join(REPO_DIR, "meta.json")
-STATE_PATH = os.path.join(REPO_DIR, "scripts", ".last_source_hash")
 
 
 def s(v):
@@ -32,27 +36,27 @@ def clip(v, default):
     return default if v > 2000 else v
 
 
+def find_source_file():
+    matches = glob.glob(os.path.join(SOURCE_DIR, SOURCE_GLOB))
+    if not matches:
+        return None
+    # several exports could be in flight at once; only the newest is a full
+    # snapshot worth keeping, older ones are stale and just get skipped here
+    matches.sort(key=os.path.getmtime, reverse=True)
+    return matches[0]
+
+
 def build():
-    if not os.path.exists(SOURCE_PATH):
-        print(f"Source file not found: {SOURCE_PATH}", file=sys.stderr)
+    source_path = find_source_file()
+    if not source_path:
+        print(f"No file matching {SOURCE_GLOB} in {SOURCE_DIR}", file=sys.stderr)
         return False
 
-    with open(SOURCE_PATH, "rb") as f:
-        source_bytes = f.read()
-    source_hash = hashlib.sha256(source_bytes).hexdigest()
-
-    previous_hash = None
-    if os.path.exists(STATE_PATH):
-        previous_hash = open(STATE_PATH, encoding="utf-8").read().strip()
-    if previous_hash == source_hash:
-        print("Source unchanged, skipping rebuild.")
-        return False
-
-    wb = openpyxl.load_workbook(SOURCE_PATH, data_only=True, read_only=True)
+    wb = openpyxl.load_workbook(source_path, data_only=True, read_only=True)
     ws = wb.active
     rows = ws.iter_rows(values_only=True)
     header = next(rows)
-    idx = {h: i for i, h in enumerate(header)}
+    idx = {str(h).strip().lower(): i for i, h in enumerate(header)}
 
     lines = []
     for r in rows:
@@ -78,21 +82,24 @@ def build():
             f"{int(l)}|{int(w)}|{int(h)}|{actif}|{poids}"
         )
 
+    wb.close()  # release the file handle before moving the source file below
+
     with open(DATA_PATH, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
     meta = {
         "generated_at": datetime.now(timezone.utc).astimezone().strftime("%d/%m/%Y %H:%M"),
         "row_count": len(lines),
-        "source_path": SOURCE_PATH,
+        "source_file": os.path.basename(source_path),
     }
     with open(META_PATH, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
-    with open(STATE_PATH, "w", encoding="utf-8") as f:
-        f.write(source_hash)
+    # only touch the source file once the new data + meta are safely written
+    os.makedirs(PROCESSED_DIR, exist_ok=True)
+    shutil.move(source_path, os.path.join(PROCESSED_DIR, os.path.basename(source_path)))
 
-    print(f"Rebuilt {len(lines)} rows -> {DATA_PATH}")
+    print(f"Rebuilt {len(lines)} rows from {os.path.basename(source_path)} -> {DATA_PATH}")
     return True
 
 
