@@ -1,0 +1,157 @@
+<meta charset="utf-8">
+<title>Cartographie 3D — Entrepôt</title>
+<style>
+  :root {
+    --bg: #0e1420;
+    --panel-bg: rgba(20, 27, 41, 0.92);
+    --border: #263449;
+    --text: #e7ecf3;
+    --muted: #93a1b8;
+    --accent: #4da3ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; overflow: hidden; }
+  #app { position: relative; width: 100%; height: 100vh; }
+  #scene-host { position: absolute; inset: 0; }
+  #scene-host canvas { display: block; width: 100%; height: 100%; }
+
+  #panel {
+    position: absolute; top: 12px; left: 12px; width: 300px; max-height: calc(100vh - 24px);
+    overflow-y: auto; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px; backdrop-filter: blur(6px); z-index: 10; transition: transform 0.2s ease;
+  }
+  #panel.collapsed { transform: translateX(calc(-100% - 20px)); }
+  #panel h1 { font-size: 15px; margin: 0 0 4px; }
+  #panel .sub { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
+  #panel h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 14px 0 6px; }
+  .row { display: flex; align-items: center; gap: 6px; font-size: 13px; margin: 4px 0; }
+  .row label { flex: 1; cursor: pointer; }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  input[type=text] { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: #0b111c; color: var(--text); font-size: 13px; }
+  input[type=checkbox] { accent-color: var(--accent); }
+  button { cursor: pointer; border: 1px solid var(--border); background: #16202f; color: var(--text); border-radius: 6px; padding: 6px 10px; font-size: 12px; }
+  button:hover { background: #1d2b3d; }
+  #search-row { display: flex; gap: 6px; margin-top: 4px; }
+  #search-row input { flex: 1; }
+  #search-msg { font-size: 11px; color: #ff7676; min-height: 14px; margin-top: 3px; }
+  .stat-grid { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; font-size: 12.5px; }
+  .stat-grid .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--accent); }
+
+  #toggle-panel {
+    position: absolute; top: 12px; left: 12px; z-index: 11; display: none;
+  }
+  #panel.collapsed ~ #toggle-panel, #toggle-panel.show { display: block; }
+
+  #details {
+    position: absolute; bottom: 12px; left: 12px; width: 300px; background: var(--panel-bg);
+    border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; font-size: 12.5px;
+    display: none; z-index: 10; backdrop-filter: blur(6px);
+  }
+  .det-row { margin: 2px 0; }
+
+  #reset-view { position: absolute; top: 12px; right: 12px; z-index: 10; }
+
+  #loading {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: var(--bg); z-index: 100; font-size: 14px; color: var(--muted);
+  }
+
+  #hint {
+    position: absolute; bottom: 12px; right: 12px; z-index: 10; font-size: 11px; color: var(--muted);
+    background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px;
+  }
+
+  #minimap {
+    position: absolute; top: 60px; right: 12px; z-index: 10;
+    background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px;
+  }
+  #minimap .mm-title { font-size: 10.5px; color: var(--muted); margin-bottom: 6px; text-align: center; }
+  .mm-grid {
+    display: grid;
+    grid-template-columns: 28px 28px 28px 28px 10px 28px 28px;
+    grid-template-rows: 28px 28px;
+    grid-template-areas: "a b c d . i j" "e f g h . i j";
+    gap: 3px;
+  }
+  .mm-cell {
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 13px; border-radius: 4px; cursor: pointer;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.15) inset;
+  }
+  .mm-cell:hover { outline: 2px solid #fff; }
+</style>
+
+<div id="app">
+  <div id="loading">Chargement de la cartographie…</div>
+  <div id="scene-host"></div>
+
+  <div id="panel">
+    <button id="toggle-panel" title="Masquer/afficher" style="float:right">▤</button>
+    <h1>Cartographie 3D — Entrepôt</h1>
+    <div class="sub" id="last-update">Chargement des données…</div>
+
+    <h2>Zone</h2>
+    <div class="row"><input type="checkbox" id="f-stock" checked><label for="f-stock">BJ-STOCK (réserve)</label></div>
+    <div class="row"><input type="checkbox" id="f-pick" checked><label for="f-pick">BJ-PICK (picking)</label></div>
+
+    <h2>Taux de remplissage</h2>
+    <div class="row"><input type="checkbox" id="f-e" checked><span class="swatch" style="background:#2ecc71"></span><label for="f-e">Vide (E)</label></div>
+    <div class="row"><input type="checkbox" id="f-f" checked><span class="swatch" style="background:#e74c3c"></span><label for="f-f">Plein (F)</label></div>
+    <div class="row"><input type="checkbox" id="f-p" checked><span class="swatch" style="background:#f39c12"></span><label for="f-p">Partiel (P)</label></div>
+    <div class="row"><input type="checkbox" id="f-i" checked><span class="swatch" style="background:#9b59b6"></span><label for="f-i">Indisponible (I)</label></div>
+
+    <h2>Statut actif</h2>
+    <div class="row"><input type="checkbox" id="f-inactive"><label for="f-inactive">Afficher les inactifs (grisés)</label></div>
+
+    <h2>Affichage</h2>
+    <div class="row"><input type="checkbox" id="f-labels" checked><label for="f-labels">Noms des cellules / allées</label></div>
+
+    <h2>Recherche par allée</h2>
+    <input type="text" id="f-allee" placeholder="ex: JB, IC…">
+
+    <h2>Aller à un emplacement</h2>
+    <div id="search-row">
+      <input type="text" id="search-box" placeholder="ex: JB05202">
+      <button id="search-btn">Aller</button>
+    </div>
+    <div id="search-msg"></div>
+
+    <h2>Statistiques (vue filtrée)</h2>
+    <div class="stat-grid">
+      <div>Total affiché</div><div class="v" id="stat-total">-</div>
+      <div>Actifs</div><div class="v" id="stat-active">-</div>
+      <div>Inactifs</div><div class="v" id="stat-inactive">-</div>
+      <div>Vides (E)</div><div class="v" id="stat-e">-</div>
+      <div>Pleins (F)</div><div class="v" id="stat-f">-</div>
+      <div>Partiels (P)</div><div class="v" id="stat-p">-</div>
+      <div>Stock</div><div class="v" id="stat-stock">-</div>
+      <div>Picking</div><div class="v" id="stat-pick">-</div>
+      <div>Taux occupation</div><div class="v" id="stat-fillpct">-</div>
+    </div>
+  </div>
+
+  <button id="reset-view">Réinitialiser la vue</button>
+  <div id="details"></div>
+
+  <div id="minimap">
+    <div class="mm-title">Cellules (clic = y aller)</div>
+    <div class="mm-grid">
+      <div class="mm-cell" data-letter="A" style="grid-area:a;background:#4f86c6">A</div>
+      <div class="mm-cell" data-letter="B" style="grid-area:b;background:#7fa96b">B</div>
+      <div class="mm-cell" data-letter="C" style="grid-area:c;background:#efc94c">C</div>
+      <div class="mm-cell" data-letter="D" style="grid-area:d;background:#ef8a76">D</div>
+      <div class="mm-cell" data-letter="E" style="grid-area:e;background:#b39ddb">E</div>
+      <div class="mm-cell" data-letter="F" style="grid-area:f;background:#5bc8e8">F</div>
+      <div class="mm-cell" data-letter="G" style="grid-area:g;background:#e399b8">G</div>
+      <div class="mm-cell" data-letter="H" style="grid-area:h;background:#f2a73b">H</div>
+      <div class="mm-cell" data-letter="I" style="grid-area:i;background:#94a3ad">I</div>
+      <div class="mm-cell" data-letter="J" style="grid-area:j;background:#6fcf97">J</div>
+    </div>
+  </div>
+
+  <div id="hint">Glisser: rotation · Molette: zoom · Clic droit: pan · Clic sur une palette: détails</div>
+</div>
+
+<script src="three.min.js"></script>
+<script src="OrbitControls.js"></script>
+<script src="app.js"></script>
