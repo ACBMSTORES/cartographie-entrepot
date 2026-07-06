@@ -5,7 +5,7 @@
   // ---------- 1. LOAD + PARSE DATA ----------
   // emplacements.txt is a pipe/newline delimited file, fetched at runtime (not
   // embedded) so an automated job can refresh just this one small file —
-  // columns: emplacement|position|niveau|area|statut|allee|longueur|largeur|hauteur|actif|poids
+  // columns: emplacement|position|niveau|area|statut|allee|longueur|largeur|hauteur|actif|poids|typestockage
   let RAW_DATA, META;
   try {
     [RAW_DATA, META] = await Promise.all([
@@ -20,7 +20,7 @@
     return;
   }
 
-  const lines = RAW_DATA.trim().split("\n");
+  const lines = RAW_DATA.replace(/\r/g, "").trim().split("\n");
   const N = lines.length;
 
   const emplacements = new Array(N);
@@ -34,6 +34,7 @@
   const hArr = new Float32Array(N);
   const actifArr = new Uint8Array(N);
   const poidsArr = new Int32Array(N);
+  const stypeArr = new Array(N);
 
   for (let i = 0; i < N; i++) {
     const f = lines[i].split("|");
@@ -48,6 +49,7 @@
     hArr[i] = parseFloat(f[8]);
     actifArr[i] = parseInt(f[9], 10);
     poidsArr[i] = parseInt(f[10], 10) || 0;
+    stypeArr[i] = f[11] || "NON_DEFINI";
   }
 
   // ---------- 2. BUILD SPATIAL LAYOUT ----------
@@ -350,6 +352,28 @@
     labelGroup.visible = e.target.checked;
   });
 
+  // ---------- 5c. STORAGE TYPE FILTER (built from whatever values are present in the data) ----------
+  const storageTypes = Array.from(new Set(stypeArr)).sort();
+  const typeContainer = document.getElementById("f-type-container");
+  storageTypes.forEach((t) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    const id = "f-type-" + t.replace(/[^A-Z0-9]/gi, "_");
+    row.innerHTML = '<input type="checkbox" id="' + id + '" checked data-type="' + t + '"><label for="' + id + '" title="' + t + '">' + t + "</label>";
+    typeContainer.appendChild(row);
+  });
+  const typeCheckboxes = Array.from(typeContainer.querySelectorAll("input[type=checkbox]"));
+  document.getElementById("type-all").addEventListener("click", (e) => {
+    e.preventDefault();
+    typeCheckboxes.forEach((cb) => (cb.checked = true));
+    applyFilters();
+  });
+  document.getElementById("type-none").addEventListener("click", (e) => {
+    e.preventDefault();
+    typeCheckboxes.forEach((cb) => (cb.checked = false));
+    applyFilters();
+  });
+
   function applyFilters() {
     const wantStock = document.getElementById("f-stock").checked;
     const wantPick = document.getElementById("f-pick").checked;
@@ -363,6 +387,9 @@
     const showInactive = document.getElementById("f-inactive").checked;
     inactiveMesh.visible = showInactive;
 
+    const wantType = {};
+    typeCheckboxes.forEach((cb) => (wantType[cb.dataset.type] = cb.checked));
+
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     function pass(i) {
@@ -371,6 +398,7 @@
       if (a === 1 && !wantPick) return false;
       const st = statutArr[i];
       if (wantStatut.hasOwnProperty(st) && !wantStatut[st]) return false;
+      if (!wantType[stypeArr[i]]) return false;
       if (alleeFilter && !alleeArr[i].toUpperCase().includes(alleeFilter)) return false;
       return true;
     }
@@ -408,12 +436,15 @@
       I: document.getElementById("f-i").checked,
     };
     const alleeFilter = document.getElementById("f-allee").value.trim().toUpperCase();
+    const wantType = {};
+    typeCheckboxes.forEach((cb) => (wantType[cb.dataset.type] = cb.checked));
     for (let i = 0; i < N; i++) {
       const a = areaArr[i];
       if (a === 0 && !wantStock) continue;
       if (a === 1 && !wantPick) continue;
       const st = statutArr[i];
       if (wantStatut.hasOwnProperty(st) && !wantStatut[st]) continue;
+      if (!wantType[stypeArr[i]]) continue;
       if (alleeFilter && !alleeArr[i].toUpperCase().includes(alleeFilter)) continue;
       total++;
       if (actifArr[i]) act++; else inact++;
@@ -435,6 +466,7 @@
   ["f-stock", "f-pick", "f-e", "f-f", "f-p", "f-i", "f-inactive"].forEach((id) => {
     document.getElementById(id).addEventListener("change", applyFilters);
   });
+  typeCheckboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
   document.getElementById("f-allee").addEventListener("input", applyFilters);
 
   // ---------- 7. SEARCH / LOCATE ----------
@@ -454,7 +486,7 @@
     panel.innerHTML =
       '<div class="det-row"><b>' + emplacements[i] + "</b></div>" +
       '<div class="det-row">Allée: ' + (alleeArr[i] || "-") + " &middot; Position: " + positionArr[i] + " &middot; Niveau: " + niveauArr[i] + "</div>" +
-      '<div class="det-row">Zone: ' + AREA_NAME[areaArr[i]] + "</div>" +
+      '<div class="det-row">Zone: ' + AREA_NAME[areaArr[i]] + " &middot; Type: " + stypeArr[i] + "</div>" +
       '<div class="det-row">Statut: ' + statutLabel(statutArr[i]) + "</div>" +
       '<div class="det-row">Etat: ' + (actifArr[i] ? "Actif" : "Inactif") + "</div>" +
       '<div class="det-row">Dimensions (LxlxH cm): ' + lArr[i] + " x " + wArr[i] + " x " + hArr[i] + "</div>" +

@@ -36,6 +36,17 @@ def clip(v, default):
     return default if v > 2000 else v
 
 
+def storage_type(raw):
+    # raw looks like "ZS-<cellule>-<type>", e.g. "ZS-J-STOCK", "ZS-B-TYPE-1-2",
+    # "ZS-BJ-ZBPSTOCK" -> keep only the meaningful suffix (STOCK, PICKING,
+    # FPP, LOURDSOL, HAUTSTOCK, CAGE, ...), dropping the "ZS-<cellule>-" prefix.
+    raw = s(raw).strip()
+    parts = raw.split("-")
+    if len(parts) >= 3 and parts[0].upper() == "ZS":
+        return "-".join(parts[2:])
+    return raw or "NON_DEFINI"
+
+
 def find_source_file():
     matches = glob.glob(os.path.join(SOURCE_DIR, SOURCE_GLOB))
     if not matches:
@@ -77,14 +88,15 @@ def build():
             poids = int(r[idx["poids_max"]])
         except (TypeError, ValueError):
             poids = 0
+        stype = storage_type(r[idx["type_stockage"]]) if "type_stockage" in idx else "NON_DEFINI"
         lines.append(
             f"{emplacement}|{position}|{niveau}|{area_c}|{statut}|{allee}|"
-            f"{int(l)}|{int(w)}|{int(h)}|{actif}|{poids}"
+            f"{int(l)}|{int(w)}|{int(h)}|{actif}|{poids}|{stype}"
         )
 
     wb.close()  # release the file handle before moving the source file below
 
-    with open(DATA_PATH, "w", encoding="utf-8") as f:
+    with open(DATA_PATH, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines))
 
     meta = {
