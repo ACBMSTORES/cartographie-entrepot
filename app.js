@@ -26,7 +26,7 @@
   const emplacements = new Array(N);
   const positionArr = new Int32Array(N);
   const niveauArr = new Int32Array(N);
-  const areaArr = new Uint8Array(N); // 0 stock, 1 pick, 2 other
+  const areaArr = new Array(N); // e.g. 'BJ-STOCK', 'BJ-PICK', 'AU-STOCK', 'AU-PICK'
   const statutArr = new Array(N); // 'E','F','P','I','X'
   const alleeArr = new Array(N);
   const lArr = new Float32Array(N);
@@ -41,7 +41,7 @@
     emplacements[i] = f[0];
     positionArr[i] = parseInt(f[1], 10) || 0;
     niveauArr[i] = parseInt(f[2], 10) || 0;
-    areaArr[i] = parseInt(f[3], 10);
+    areaArr[i] = f[3] || "NON_DEFINI";
     statutArr[i] = f[4];
     alleeArr[i] = f[5];
     lArr[i] = parseFloat(f[6]);
@@ -182,8 +182,6 @@
     I: 0x9b59b6, // unknown/blocked - purple
     X: 0x7f8c8d, // fallback
   };
-  const AREA_NAME = ["BJ-STOCK", "BJ-PICK", "AUTRE"];
-
   const posX = new Float32Array(N);
   const posY = new Float32Array(N);
   const posZ = new Float32Array(N);
@@ -386,6 +384,28 @@
     labelGroup.visible = e.target.checked;
   });
 
+  // ---------- 5b2. ZONE FILTER (built from whatever area values are present in the data) ----------
+  const zoneValues = Array.from(new Set(areaArr)).sort();
+  const zoneContainer = document.getElementById("f-zone-container");
+  zoneValues.forEach((z) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    const id = "f-zone-" + z.replace(/[^A-Z0-9]/gi, "_");
+    row.innerHTML = '<input type="checkbox" id="' + id + '" checked data-zone="' + z + '"><label for="' + id + '" title="' + z + '">' + z + "</label>";
+    zoneContainer.appendChild(row);
+  });
+  const zoneCheckboxes = Array.from(zoneContainer.querySelectorAll("input[type=checkbox]"));
+  document.getElementById("zone-all").addEventListener("click", (e) => {
+    e.preventDefault();
+    zoneCheckboxes.forEach((cb) => (cb.checked = true));
+    applyFilters();
+  });
+  document.getElementById("zone-none").addEventListener("click", (e) => {
+    e.preventDefault();
+    zoneCheckboxes.forEach((cb) => (cb.checked = false));
+    applyFilters();
+  });
+
   // ---------- 5c. STORAGE TYPE FILTER (built from whatever values are present in the data) ----------
   const storageTypes = Array.from(new Set(stypeArr)).sort();
   const typeContainer = document.getElementById("f-type-container");
@@ -409,8 +429,6 @@
   });
 
   function applyFilters() {
-    const wantStock = document.getElementById("f-stock").checked;
-    const wantPick = document.getElementById("f-pick").checked;
     const wantStatut = {
       E: document.getElementById("f-e").checked,
       F: document.getElementById("f-f").checked,
@@ -421,15 +439,15 @@
     const showInactive = document.getElementById("f-inactive").checked;
     inactiveMesh.visible = showInactive;
 
+    const wantZone = {};
+    zoneCheckboxes.forEach((cb) => (wantZone[cb.dataset.zone] = cb.checked));
     const wantType = {};
     typeCheckboxes.forEach((cb) => (wantType[cb.dataset.type] = cb.checked));
 
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     function pass(i) {
-      const a = areaArr[i];
-      if (a === 0 && !wantStock) return false;
-      if (a === 1 && !wantPick) return false;
+      if (!wantZone[areaArr[i]]) return false;
       const st = statutArr[i];
       if (wantStatut.hasOwnProperty(st) && !wantStatut[st]) return false;
       if (!wantType[stypeArr[i]]) return false;
@@ -461,8 +479,8 @@
   // ---------- 6. STATS ----------
   function updateStats() {
     let total = 0, act = 0, inact = 0, e = 0, f = 0, p = 0, other = 0, stock = 0, pick = 0;
-    const wantStock = document.getElementById("f-stock").checked;
-    const wantPick = document.getElementById("f-pick").checked;
+    const wantZone = {};
+    zoneCheckboxes.forEach((cb) => (wantZone[cb.dataset.zone] = cb.checked));
     const wantStatut = {
       E: document.getElementById("f-e").checked,
       F: document.getElementById("f-f").checked,
@@ -474,8 +492,7 @@
     typeCheckboxes.forEach((cb) => (wantType[cb.dataset.type] = cb.checked));
     for (let i = 0; i < N; i++) {
       const a = areaArr[i];
-      if (a === 0 && !wantStock) continue;
-      if (a === 1 && !wantPick) continue;
+      if (!wantZone[a]) continue;
       const st = statutArr[i];
       if (wantStatut.hasOwnProperty(st) && !wantStatut[st]) continue;
       if (!wantType[stypeArr[i]]) continue;
@@ -483,7 +500,7 @@
       total++;
       if (actifArr[i]) act++; else inact++;
       if (st === "E") e++; else if (st === "F") f++; else if (st === "P") p++; else other++;
-      if (a === 0) stock++; else if (a === 1) pick++;
+      if (a.includes("STOCK")) stock++; else if (a.includes("PICK")) pick++;
     }
     document.getElementById("stat-total").textContent = total.toLocaleString("fr-FR");
     document.getElementById("stat-active").textContent = act.toLocaleString("fr-FR");
@@ -497,9 +514,10 @@
     document.getElementById("stat-fillpct").textContent = fillPct + "%";
   }
 
-  ["f-stock", "f-pick", "f-e", "f-f", "f-p", "f-i", "f-inactive"].forEach((id) => {
+  ["f-e", "f-f", "f-p", "f-i", "f-inactive"].forEach((id) => {
     document.getElementById(id).addEventListener("change", applyFilters);
   });
+  zoneCheckboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
   typeCheckboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
   document.getElementById("f-allee").addEventListener("input", applyFilters);
 
@@ -520,7 +538,7 @@
     panel.innerHTML =
       '<div class="det-row"><b>' + emplacements[i] + "</b></div>" +
       '<div class="det-row">Allée: ' + (alleeArr[i] || "-") + " &middot; Position: " + positionArr[i] + " &middot; Niveau: " + niveauArr[i] + "</div>" +
-      '<div class="det-row">Zone: ' + AREA_NAME[areaArr[i]] + " &middot; Type: " + stypeArr[i] + "</div>" +
+      '<div class="det-row">Zone: ' + areaArr[i] + " &middot; Type: " + stypeArr[i] + "</div>" +
       '<div class="det-row">Statut: ' + statutLabel(statutArr[i]) + "</div>" +
       '<div class="det-row">Etat: ' + (actifArr[i] ? "Actif" : "Inactif") + "</div>" +
       '<div class="det-row">Dimensions (LxlxH cm): ' + lArr[i] + " x " + wArr[i] + " x " + hArr[i] + "</div>" +

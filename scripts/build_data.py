@@ -80,8 +80,7 @@ def build():
             continue
         position = s(r[idx["position"]])
         niveau = s(r[idx["niveau"]])
-        area = r[idx["area"]]
-        area_c = "0" if area == "BJ-STOCK" else ("1" if area == "BJ-PICK" else "2")
+        area = s(r[idx["area"]]).strip() or "NON_DEFINI"
         statut = s(r[idx["statut_emplacement"]]) or "X"
         allee = s(r[idx["allee"]])
         l = clip(r[idx["longueur"]], 80)
@@ -94,7 +93,7 @@ def build():
             poids = 0
         stype = storage_type(r[idx["type_stockage"]]) if "type_stockage" in idx else "NON_DEFINI"
         lines.append(
-            f"{emplacement}|{position}|{niveau}|{area_c}|{statut}|{allee}|"
+            f"{emplacement}|{position}|{niveau}|{area}|{statut}|{allee}|"
             f"{int(l)}|{int(w)}|{int(h)}|{actif}|{poids}|{stype}"
         )
 
