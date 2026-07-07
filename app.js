@@ -96,11 +96,23 @@
   const rowZ = [0, CELL_DEPTH + ROW_GAP];
   const totalDepth = CELL_DEPTH * 2 + ROW_GAP;
 
+  // real max "position" reached by a given cellule's own aisles — used for
+  // the N/K/M/L block below, whose cellules are far from uniform in size
+  // (e.g. N only has 4 short aisles, M has 15 much longer ones) and must be
+  // drawn at their true relative proportions rather than a shared size.
+  const maxPositionOf = (letter) => {
+    let m = 1;
+    for (let i = 0; i < N; i++) {
+      if (alleeArr[i][0] === letter && positionArr[i] > m) m = positionArr[i];
+    }
+    return m;
+  };
+
   // The N/K/M/L block sits in a separate depot, so its front row is anchored
   // so that N's very first emplacement (position 1) lands exactly level with
   // J's very last emplacement (J is a tall cellule, its max position reaches
   // z = totalDepth) — rather than restarting at z = 0 like the main block.
-  const DEPOT2_ROW_Z = [totalDepth - SLOT_PITCH, totalDepth - SLOT_PITCH + CELL_DEPTH + ROW_GAP];
+  const DEPOT2_FRONT_Z = totalDepth - SLOT_PITCH;
 
   const COLUMNS = [
     { top: "A", bottom: "E" },
@@ -109,8 +121,8 @@
     { top: "D", bottom: "H" },
     { tall: "I" },
     { tall: "J" },
-    { top: "N", bottom: "M", gapBefore: DEPOT_GAP, rowZ: DEPOT2_ROW_Z },
-    { top: "K", bottom: "L", rowZ: DEPOT2_ROW_Z },
+    { top: "N", bottom: "M", gapBefore: DEPOT_GAP, frontZ: DEPOT2_FRONT_Z, ownDepth: true },
+    { top: "K", bottom: "L", frontZ: DEPOT2_FRONT_Z, ownDepth: true },
   ];
 
   // zPitch = meters advanced per unit of the raw "position" field. Normal
@@ -121,15 +133,25 @@
   let cursorX = 0;
   COLUMNS.forEach((col, idx) => {
     if (idx > 0) cursorX += col.gapBefore != null ? col.gapBefore : COL_GAP;
-    const colRowZ = col.rowZ || rowZ;
     if (col.tall) {
       const width = Math.max(subsOf(col.tall).length, 1) * AISLE_PITCH;
       cellOrigin.set(col.tall, { x: cursorX, z: 0, depth: totalDepth, zPitch: totalDepth / maxPosition });
       cursorX += width;
+    } else if (col.ownDepth) {
+      // each cellule keeps its own true width and depth; the bottom one
+      // simply starts right after the top one's own depth ends.
+      const topDepth = maxPositionOf(col.top) * SLOT_PITCH;
+      const bottomDepth = maxPositionOf(col.bottom) * SLOT_PITCH;
+      const topWidth = Math.max(subsOf(col.top).length, 1) * AISLE_PITCH;
+      const bottomWidth = Math.max(subsOf(col.bottom).length, 1) * AISLE_PITCH;
+      const frontZ = col.frontZ != null ? col.frontZ : 0;
+      cellOrigin.set(col.top, { x: cursorX, z: frontZ, depth: topDepth, zPitch: SLOT_PITCH });
+      cellOrigin.set(col.bottom, { x: cursorX, z: frontZ + topDepth + ROW_GAP, depth: bottomDepth, zPitch: SLOT_PITCH });
+      cursorX += Math.max(topWidth, bottomWidth);
     } else {
       const width = Math.max(subsOf(col.top).length, subsOf(col.bottom).length, 1) * AISLE_PITCH;
-      cellOrigin.set(col.top, { x: cursorX, z: colRowZ[0], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
-      cellOrigin.set(col.bottom, { x: cursorX, z: colRowZ[1], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
+      cellOrigin.set(col.top, { x: cursorX, z: rowZ[0], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
+      cellOrigin.set(col.bottom, { x: cursorX, z: rowZ[1], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
       cursorX += width;
     }
   });
