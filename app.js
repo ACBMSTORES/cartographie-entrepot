@@ -75,7 +75,8 @@
   const GAP = 0.5; // requested clearance between two neighbouring emplacements, in meters
   const AISLE_PITCH = 1.2 + GAP; // meters between two adjacent aisles (based on typical 'largeur' 120cm + gap)
   const SLOT_PITCH = 0.8 + GAP; // meters between two consecutive slots along an aisle (based on typical 'longueur' 80cm + gap)
-  const COL_GAP = 6; // cross-aisle gap between columns of cellules
+  const COL_GAP = 6; // cross-aisle gap between columns of cellules within the same depot
+  const DEPOT_GAP = 5; // 500cm gap before the N/K/M/L block, which sits in a separate depot building
 
   let maxPosition = 1, maxHauteur = 1;
   for (let i = 0; i < N; i++) {
@@ -98,7 +99,7 @@
     { top: "D", bottom: "H" },
     { tall: "I" },
     { tall: "J" },
-    { top: "N", bottom: "M" },
+    { top: "N", bottom: "M", gapBefore: DEPOT_GAP },
     { top: "K", bottom: "L" },
   ];
 
@@ -112,16 +113,17 @@
   // visually span the full depth of both rows, without ever overlapping.
   const cellOrigin = new Map(); // cellule letter -> {x, z, depth, zPitch}
   let cursorX = 0;
-  COLUMNS.forEach((col) => {
+  COLUMNS.forEach((col, idx) => {
+    if (idx > 0) cursorX += col.gapBefore != null ? col.gapBefore : COL_GAP;
     if (col.tall) {
       const width = Math.max(subsOf(col.tall).length, 1) * AISLE_PITCH;
       cellOrigin.set(col.tall, { x: cursorX, z: 0, depth: totalDepth, zPitch: totalDepth / maxPosition });
-      cursorX += width + COL_GAP;
+      cursorX += width;
     } else {
       const width = Math.max(subsOf(col.top).length, subsOf(col.bottom).length, 1) * AISLE_PITCH;
       cellOrigin.set(col.top, { x: cursorX, z: rowZ[0], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
       cellOrigin.set(col.bottom, { x: cursorX, z: rowZ[1], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
-      cursorX += width + COL_GAP;
+      cursorX += width;
     }
   });
 
