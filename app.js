@@ -86,47 +86,50 @@
   const CELL_DEPTH = maxPosition * SLOT_PITCH; // real depth of one A-H cellule, slot pitch included
   const ROW_GAP = CELL_DEPTH * 0.12; // cross-aisle gap between the front/back rows, scaled to stay visible at this depth
 
-  // reference plan: row 0 = front, row 1 = back; 4 columns hold a pair of
-  // cellules each (top/bottom), the last 2 columns hold one tall cellule each
-  // that spans the full depth of both rows (as in the reference diagram).
-  const GRID_ROWS = [
-    ["A", "B", "C", "D"],
-    ["E", "F", "G", "H"],
+  // reference plan, left to right: 4 columns hold a pair of cellules each
+  // (top/bottom), then 2 tall cellules spanning the full depth of both rows,
+  // then a second 4-column block (2 columns of pairs) — as in the reference
+  // diagram. Each entry is either {top, bottom} (two normal-depth cellules
+  // stacked front/back) or {tall} (one cellule spanning both rows).
+  const COLUMNS = [
+    { top: "A", bottom: "E" },
+    { top: "B", bottom: "F" },
+    { top: "C", bottom: "G" },
+    { top: "D", bottom: "H" },
+    { tall: "I" },
+    { tall: "J" },
+    { top: "N", bottom: "M" },
+    { top: "K", bottom: "L" },
   ];
-  const TALL_CELLULES = ["I", "J"];
 
   const subsOf = (letter) => Array.from(blocks.get(letter) || []).sort();
-  const colWidth = (col) => {
-    const a = subsOf(GRID_ROWS[0][col]).length;
-    const b = subsOf(GRID_ROWS[1][col]).length;
-    return Math.max(a, b, 1) * AISLE_PITCH;
-  };
-
-  const colX = [0, 0, 0, 0];
-  for (let c = 1; c < 4; c++) colX[c] = colX[c - 1] + colWidth(c - 1) + COL_GAP;
   const rowZ = [0, CELL_DEPTH + ROW_GAP];
   const totalDepth = CELL_DEPTH * 2 + ROW_GAP;
 
-  // zPitch = meters advanced per unit of the raw "position" field. A-H cellules
-  // use the real slot pitch (so consecutive emplacements keep exactly GAP
-  // meters of clearance); I/J are stretched so they visually span the full
-  // depth of both rows as in the reference plan, without ever overlapping.
+  // zPitch = meters advanced per unit of the raw "position" field. Normal
+  // cellules use the real slot pitch (so consecutive emplacements keep
+  // exactly GAP meters of clearance); tall cellules are stretched so they
+  // visually span the full depth of both rows, without ever overlapping.
   const cellOrigin = new Map(); // cellule letter -> {x, z, depth, zPitch}
-  GRID_ROWS.forEach((row, r) => {
-    row.forEach((letter, c) => {
-      cellOrigin.set(letter, { x: colX[c], z: rowZ[r], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
-    });
-  });
-  let tallX = colX[3] + colWidth(3) + COL_GAP;
-  TALL_CELLULES.forEach((letter) => {
-    cellOrigin.set(letter, { x: tallX, z: 0, depth: totalDepth, zPitch: totalDepth / maxPosition });
-    tallX += subsOf(letter).length * AISLE_PITCH + COL_GAP;
+  let cursorX = 0;
+  COLUMNS.forEach((col) => {
+    if (col.tall) {
+      const width = Math.max(subsOf(col.tall).length, 1) * AISLE_PITCH;
+      cellOrigin.set(col.tall, { x: cursorX, z: 0, depth: totalDepth, zPitch: totalDepth / maxPosition });
+      cursorX += width + COL_GAP;
+    } else {
+      const width = Math.max(subsOf(col.top).length, subsOf(col.bottom).length, 1) * AISLE_PITCH;
+      cellOrigin.set(col.top, { x: cursorX, z: rowZ[0], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
+      cellOrigin.set(col.bottom, { x: cursorX, z: rowZ[1], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
+      cursorX += width + COL_GAP;
+    }
   });
 
   const CELLULE_COLOR = {
     A: "#4f86c6", B: "#7fa96b", C: "#efc94c", D: "#ef8a76",
     E: "#b39ddb", F: "#5bc8e8", G: "#e399b8", H: "#f2a73b",
     I: "#94a3ad", J: "#6fcf97",
+    N: "#ffd166", K: "#ef476f", M: "#06d6a0", L: "#118ab2",
   };
 
   const alleeY = new Map(); // allee code -> {x, z, depth, zPitch} origin (base of that aisle)

@@ -73,9 +73,9 @@
   #minimap .mm-title { font-size: 10.5px; color: var(--muted); margin-bottom: 6px; text-align: center; }
   .mm-grid {
     display: grid;
-    grid-template-columns: 28px 28px 28px 28px 10px 28px 28px;
+    grid-template-columns: 28px 28px 28px 28px 10px 28px 28px 10px 28px 28px;
     grid-template-rows: 28px 28px;
-    grid-template-areas: "a b c d . i j" "e f g h . i j";
+    grid-template-areas: "a b c d . i j . n k" "e f g h . i j . m l";
     gap: 3px;
   }
   .mm-cell {
@@ -154,6 +154,10 @@
       <div class="mm-cell" data-letter="H" style="grid-area:h;background:#f2a73b">H</div>
       <div class="mm-cell" data-letter="I" style="grid-area:i;background:#94a3ad">I</div>
       <div class="mm-cell" data-letter="J" style="grid-area:j;background:#6fcf97">J</div>
+      <div class="mm-cell" data-letter="N" style="grid-area:n;background:#ffd166">N</div>
+      <div class="mm-cell" data-letter="K" style="grid-area:k;background:#ef476f">K</div>
+      <div class="mm-cell" data-letter="M" style="grid-area:m;background:#06d6a0">M</div>
+      <div class="mm-cell" data-letter="L" style="grid-area:l;background:#118ab2">L</div>
     </div>
   </div>
 
