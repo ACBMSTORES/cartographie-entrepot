@@ -573,9 +573,17 @@
     clearSelection();
     document.getElementById("details").style.display = "none";
     const cx = (minPX + maxPX) / 2, cz = (minPZ + maxPZ) / 2;
-    const span = Math.max(maxPX - minPX, maxPZ - minPZ, 10);
+    const spanX = maxPX - minPX, spanZ = maxPZ - minPZ;
+    // A single aisle is very narrow (spanX) but can be very long (spanZ up to
+    // 700+m for I/J) — scaling camera height with spanZ like elsewhere put the
+    // camera 100m+ in the air looking almost straight down at a sliver of
+    // rack. Height is capped independently so the view stays low and along
+    // the aisle instead, which is what actually shows the far end clearly.
+    const height = Math.min(Math.max(spanZ * 0.12, 15), 80);
+    const back = Math.max(spanZ * 0.55, 20);
+    const side = Math.max(spanX, 10) + height * 0.6;
     controls.target.set(cx, 0, cz);
-    camera.position.set(cx - span * 0.15, span * 0.55, cz + span * 0.75);
+    camera.position.set(cx - side, height, cz + back);
     controls.update();
   }
   document.getElementById("allee-goto-btn").addEventListener("click", goToAllee);
