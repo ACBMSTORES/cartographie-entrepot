@@ -318,7 +318,7 @@
   activeIdx.forEach((i, k) => (instanceLookup[i] = { mesh: activeMesh, k }));
   inactiveIdx.forEach((i, k) => (instanceLookup[i] = { mesh: inactiveMesh, k }));
 
-  const HIGHLIGHT_COLOR = [1, 0.878, 0.4]; // bright yellow, matches the marker ring
+  const HIGHLIGHT_COLOR = [1, 1, 1]; // pure white — the only hue-free option, so it can't drift toward looking like any statut color under shading, and gives max contrast against the dark scene
   let selected = null; // { i, mesh, k, r, g, b } — original color kept for revert
 
   function clearSelection() {
@@ -553,7 +553,7 @@
 
   const marker = new THREE.Mesh(
     new THREE.RingGeometry(0.9, 1.15, 24),
-    new THREE.MeshBasicMaterial({ color: 0xffe066, side: THREE.DoubleSide, transparent: true, opacity: 0.95 })
+    new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.95 })
   );
   marker.rotation.x = -Math.PI / 2;
   marker.visible = false;
