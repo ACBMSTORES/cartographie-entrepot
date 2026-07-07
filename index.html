@@ -36,8 +36,8 @@
   input[type=checkbox] { accent-color: var(--accent); }
   button { cursor: pointer; border: 1px solid var(--border); background: #16202f; color: var(--text); border-radius: 6px; padding: 6px 10px; font-size: 12px; }
   button:hover { background: #1d2b3d; }
-  #search-row { display: flex; gap: 6px; margin-top: 4px; }
-  #search-row input { flex: 1; }
+  #search-row, #allee-row { display: flex; gap: 6px; margin-top: 4px; }
+  #search-row input, #allee-row input { flex: 1; }
   #search-msg { font-size: 11px; color: #ff7676; min-height: 14px; margin-top: 3px; }
   .stat-grid { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; font-size: 12.5px; }
   .stat-grid .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--accent); }
@@ -114,7 +114,10 @@
     <div class="row"><input type="checkbox" id="f-labels" checked><label for="f-labels">Noms des cellules / allées</label></div>
 
     <h2>Recherche par allée</h2>
-    <input type="text" id="f-allee" placeholder="ex: JB, IC…">
+    <div id="allee-row">
+      <input type="text" id="f-allee" placeholder="ex: JB, IC…">
+      <button id="allee-goto-btn">Aller</button>
+    </div>
 
     <h2>Aller à un emplacement</h2>
     <div id="search-row">

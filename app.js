@@ -547,6 +547,42 @@
   typeCheckboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
   document.getElementById("f-allee").addEventListener("input", applyFilters);
 
+  // Typing an allee code only filters visibility (live, on every keystroke);
+  // flying the camera there is a separate explicit action so partial input
+  // while typing doesn't yank the view around. This frames the WHOLE matched
+  // aisle (its near end AND its far end), which is the easiest way to reach
+  // "the last emplacements" of a long aisle without hunting for it manually.
+  function goToAllee() {
+    const filter = document.getElementById("f-allee").value.trim().toUpperCase();
+    const msg = document.getElementById("search-msg");
+    if (!filter) return;
+    let minPX = Infinity, maxPX = -Infinity, minPZ = Infinity, maxPZ = -Infinity, count = 0;
+    for (let i = 0; i < N; i++) {
+      if (!alleeArr[i].toUpperCase().includes(filter)) continue;
+      count++;
+      if (posX[i] < minPX) minPX = posX[i];
+      if (posX[i] > maxPX) maxPX = posX[i];
+      if (posZ[i] < minPZ) minPZ = posZ[i];
+      if (posZ[i] > maxPZ) maxPZ = posZ[i];
+    }
+    if (!count) {
+      msg.textContent = "Aucune allée ne correspond.";
+      return;
+    }
+    msg.textContent = "";
+    clearSelection();
+    document.getElementById("details").style.display = "none";
+    const cx = (minPX + maxPX) / 2, cz = (minPZ + maxPZ) / 2;
+    const span = Math.max(maxPX - minPX, maxPZ - minPZ, 10);
+    controls.target.set(cx, 0, cz);
+    camera.position.set(cx - span * 0.15, span * 0.55, cz + span * 0.75);
+    controls.update();
+  }
+  document.getElementById("allee-goto-btn").addEventListener("click", goToAllee);
+  document.getElementById("f-allee").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") goToAllee();
+  });
+
   // ---------- 7. SEARCH / LOCATE ----------
   const empIndex = new Map();
   for (let i = 0; i < N; i++) empIndex.set(emplacements[i], i);
