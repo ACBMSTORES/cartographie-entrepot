@@ -47,21 +47,25 @@ def storage_type(raw):
     return raw or "NON_DEFINI"
 
 
-def find_source_file():
+def find_source_files():
     matches = glob.glob(os.path.join(SOURCE_DIR, SOURCE_GLOB))
-    if not matches:
-        return None
-    # several exports could be in flight at once; only the newest is a full
-    # snapshot worth keeping, older ones are stale and just get skipped here
+    # newest first: several exports can pile up if this job missed a run or
+    # two (e.g. the scheduler was offline) — only the newest is a full
+    # snapshot worth building from, but ALL of them must be archived so they
+    # don't just sit there and get mistaken for "not yet processed" next time
     matches.sort(key=os.path.getmtime, reverse=True)
-    return matches[0]
+    return matches
 
 
 def build():
-    source_path = find_source_file()
-    if not source_path:
+    source_paths = find_source_files()
+    if not source_paths:
         print(f"No file matching {SOURCE_GLOB} in {SOURCE_DIR}", file=sys.stderr)
         return False
+    source_path = source_paths[0]
+    stale_paths = source_paths[1:]
+    if stale_paths:
+        print(f"Found {len(stale_paths)} older export(s) alongside the newest one — archiving them unread, they are superseded.")
 
     wb = openpyxl.load_workbook(source_path, data_only=True, read_only=True)
     ws = wb.active
@@ -107,11 +111,14 @@ def build():
     with open(META_PATH, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
-    # only touch the source file once the new data + meta are safely written
+    # only touch the source files once the new data + meta are safely written
     os.makedirs(PROCESSED_DIR, exist_ok=True)
-    shutil.move(source_path, os.path.join(PROCESSED_DIR, os.path.basename(source_path)))
+    for p in [source_path] + stale_paths:
+        shutil.move(p, os.path.join(PROCESSED_DIR, os.path.basename(p)))
 
     print(f"Rebuilt {len(lines)} rows from {os.path.basename(source_path)} -> {DATA_PATH}")
+    if stale_paths:
+        print(f"Archived {len(stale_paths)} superseded export(s) too.")
     return True
 
 
