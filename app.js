@@ -76,7 +76,7 @@
   const AISLE_PITCH = 1.2 + GAP; // meters between two adjacent aisles (based on typical 'largeur' 120cm + gap)
   const SLOT_PITCH = 0.8 + GAP; // meters between two consecutive slots along an aisle (based on typical 'longueur' 80cm + gap)
   const COL_GAP = 6; // cross-aisle gap between columns of cellules within the same depot
-  const DEPOT_GAP = 5; // 500cm gap before the N/K/M/L block, which sits in a separate depot building
+  const DEPOT_GAP = 30; // 3000cm gap before the N/K/M/L block, which sits in a separate depot building
 
   let maxPosition = 1, maxHauteur = 1;
   for (let i = 0; i < N; i++) {
@@ -92,6 +92,16 @@
   // then a second 4-column block (2 columns of pairs) — as in the reference
   // diagram. Each entry is either {top, bottom} (two normal-depth cellules
   // stacked front/back) or {tall} (one cellule spanning both rows).
+  const subsOf = (letter) => Array.from(blocks.get(letter) || []).sort();
+  const rowZ = [0, CELL_DEPTH + ROW_GAP];
+  const totalDepth = CELL_DEPTH * 2 + ROW_GAP;
+
+  // The N/K/M/L block sits in a separate depot, so its front row is anchored
+  // so that N's very first emplacement (position 1) lands exactly level with
+  // J's very last emplacement (J is a tall cellule, its max position reaches
+  // z = totalDepth) — rather than restarting at z = 0 like the main block.
+  const DEPOT2_ROW_Z = [totalDepth - SLOT_PITCH, totalDepth - SLOT_PITCH + CELL_DEPTH + ROW_GAP];
+
   const COLUMNS = [
     { top: "A", bottom: "E" },
     { top: "B", bottom: "F" },
@@ -99,13 +109,9 @@
     { top: "D", bottom: "H" },
     { tall: "I" },
     { tall: "J" },
-    { top: "N", bottom: "M", gapBefore: DEPOT_GAP },
-    { top: "K", bottom: "L" },
+    { top: "N", bottom: "M", gapBefore: DEPOT_GAP, rowZ: DEPOT2_ROW_Z },
+    { top: "K", bottom: "L", rowZ: DEPOT2_ROW_Z },
   ];
-
-  const subsOf = (letter) => Array.from(blocks.get(letter) || []).sort();
-  const rowZ = [0, CELL_DEPTH + ROW_GAP];
-  const totalDepth = CELL_DEPTH * 2 + ROW_GAP;
 
   // zPitch = meters advanced per unit of the raw "position" field. Normal
   // cellules use the real slot pitch (so consecutive emplacements keep
@@ -115,14 +121,15 @@
   let cursorX = 0;
   COLUMNS.forEach((col, idx) => {
     if (idx > 0) cursorX += col.gapBefore != null ? col.gapBefore : COL_GAP;
+    const colRowZ = col.rowZ || rowZ;
     if (col.tall) {
       const width = Math.max(subsOf(col.tall).length, 1) * AISLE_PITCH;
       cellOrigin.set(col.tall, { x: cursorX, z: 0, depth: totalDepth, zPitch: totalDepth / maxPosition });
       cursorX += width;
     } else {
       const width = Math.max(subsOf(col.top).length, subsOf(col.bottom).length, 1) * AISLE_PITCH;
-      cellOrigin.set(col.top, { x: cursorX, z: rowZ[0], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
-      cellOrigin.set(col.bottom, { x: cursorX, z: rowZ[1], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
+      cellOrigin.set(col.top, { x: cursorX, z: colRowZ[0], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
+      cellOrigin.set(col.bottom, { x: cursorX, z: colRowZ[1], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
       cursorX += width;
     }
   });
