@@ -312,6 +312,32 @@
   const activePos = activeBuild.basePos, activeScale = activeBuild.baseScale;
   const inactivePos = inactiveBuild.basePos, inactiveScale = inactiveBuild.baseScale;
 
+  // reverse lookup so a click/search on emplacement index i can find which
+  // InstancedMesh + slot it lives in, to recolor it as "selected".
+  const instanceLookup = new Array(N);
+  activeIdx.forEach((i, k) => (instanceLookup[i] = { mesh: activeMesh, k }));
+  inactiveIdx.forEach((i, k) => (instanceLookup[i] = { mesh: inactiveMesh, k }));
+
+  const HIGHLIGHT_COLOR = [1, 0.878, 0.4]; // bright yellow, matches the marker ring
+  let selected = null; // { i, mesh, k, r, g, b } — original color kept for revert
+
+  function clearSelection() {
+    if (!selected) return;
+    selected.mesh.instanceColor.setXYZ(selected.k, selected.r, selected.g, selected.b);
+    selected.mesh.instanceColor.needsUpdate = true;
+    selected = null;
+  }
+
+  function selectEmplacement(i) {
+    clearSelection();
+    const loc = instanceLookup[i];
+    if (!loc) return;
+    const r = colorArr[i * 3], g = colorArr[i * 3 + 1], b = colorArr[i * 3 + 2];
+    loc.mesh.instanceColor.setXYZ(loc.k, HIGHLIGHT_COLOR[0], HIGHLIGHT_COLOR[1], HIGHLIGHT_COLOR[2]);
+    loc.mesh.instanceColor.needsUpdate = true;
+    selected = { i, mesh: loc.mesh, k: loc.k, r, g, b };
+  }
+
   // ---------- 5b. LABELS (cellule letters + aisle names) ----------
   let maxShelfTop = 0;
   for (let i = 0; i < N; i++) {
@@ -559,6 +585,7 @@
     document.getElementById("search-msg").textContent = "";
     marker.position.set(posX[i], niveauArr[i] * LEVEL_HEIGHT + 0.02, posZ[i]);
     marker.visible = true;
+    selectEmplacement(i);
     const target = new THREE.Vector3(posX[i], posY[i], posZ[i]);
     controls.target.copy(target);
     const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
@@ -590,6 +617,7 @@
       const i = list[hit.instanceId];
       marker.position.set(posX[i], niveauArr[i] * LEVEL_HEIGHT + 0.02, posZ[i]);
       marker.visible = true;
+      selectEmplacement(i);
       showDetails(i);
     }
   });
@@ -599,6 +627,7 @@
     camera.position.set(centerX - spanDiag * 0.45, spanDiag * 0.55, centerZ + spanDiag * 0.45);
     controls.target.set(centerX, 0, centerZ);
     marker.visible = false;
+    clearSelection();
     document.getElementById("details").style.display = "none";
   });
 
@@ -615,6 +644,7 @@
       controls.target.set(cx, 0, cz);
       camera.position.set(cx - dist * 0.4, dist * 0.5, cz + dist * 0.4);
       marker.visible = false;
+      clearSelection();
       document.getElementById("details").style.display = "none";
     });
   });
