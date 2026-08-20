@@ -185,28 +185,41 @@
   // expedition, lane 30, slot A. BJ-E and BJ-R codes name the exact same
   // physical lanes (expedition/reception are just two WMS-side views of the
   // same dock door), so both sides share one number -> cellule/rank mapping.
-  // A handful of codes (BJ-ED.., BJ-T01.., ANOM/AUDIT) don't fit this pattern
-  // and are left unpositioned, same as any other row with no allee.
+  // Cellule assignment below is cross-checked against "Visual Map extension
+  // V1.xlsm" (a cell-per-slot floor plan), which only documents lanes 45-70:
+  // 56-70 sit at cellule J's near/entrance edge, 45-54 at I's (56 is missing
+  // there on purpose). Everything else (1-44 at E, 71-98 at K/M, 190-198
+  // sandwiched in F/G) comes from the operator directly, not the plan. A
+  // handful of codes (BJ-ED.., BJ-T01.., ANOM/AUDIT) don't fit the
+  // number+letter pattern at all and are left unpositioned.
   const TRAVEE_RE = /^BJ-[ER](\d{2,3})([A-Z])$/;
-  const TRAVEE_MAIN_CUTOFF = 70; // lanes 1-70 face cellules E,F,G,H
-  const TRAVEE_SPECIAL_MIN = 190; // lanes 190-198: a separate strip inside F/G, between the main lanes and the picking racks
-  const TRAVEE_GAP = 2; // clearance between a cellule's outer face and its first lane
+  const TRAVEE_GAP = 2; // clearance between a cellule's edge and its first lane
   const TRAVEE_SLOT_PITCH = 1.3; // spacing between successive lettered pallet slots within one lane
   const TRAVEE_SPECIAL_INSET = 1; // how far inside the cellule's edge the 190-198 strip sits
 
+  function range(a, b) { // inclusive
+    const out = [];
+    for (let n = a; n <= b; n++) out.push(n);
+    return out;
+  }
   const traveeNumbers = new Set();
   for (let i = 0; i < N; i++) {
     const m = TRAVEE_RE.exec(emplacements[i]);
     if (m) traveeNumbers.add(parseInt(m[1], 10));
   }
-  const mainNums = Array.from(traveeNumbers).filter((n) => n <= TRAVEE_MAIN_CUTOFF).sort((a, b) => a - b);
-  const secondNums = Array.from(traveeNumbers).filter((n) => n > TRAVEE_MAIN_CUTOFF && n < TRAVEE_SPECIAL_MIN).sort((a, b) => a - b);
-  const specialNums = Array.from(traveeNumbers).filter((n) => n >= TRAVEE_SPECIAL_MIN).sort((a, b) => a - b);
+  const presentOnly = (nums) => nums.filter((n) => traveeNumbers.has(n));
+  const jNums = presentOnly(range(56, 70).reverse()); // 70 down to 56, at J's near edge
+  const iNums = presentOnly(range(45, 54).reverse()); // 54 down to 45, at I's near edge
+  const eNums = presentOnly(range(1, 44)); // all at cellule E — confirmed by operator, not the plan
+  const secondNums = presentOnly(range(71, 98)); // K,M far edge — confirmed by operator, not the plan
+  const specialNums = presentOnly(range(190, 198)); // sandwiched in F,G — confirmed by operator
 
-  // numbers -> cellule assigned left-to-right in physical order, spread evenly
-  // across that cellule's own footprint width so the lane strip lines up with it
-  const traveeSlot = new Map(); // number -> {x, letter, special}
-  function placeTraveeGroup(numbers, letters, special) {
+  // numbers -> cellule, spread evenly across that cellule's own footprint
+  // width so the lane strip lines up with it. edge: 'near' (I/J entrance
+  // side), 'far' (outward-facing dock wall), or 'sandwich' (just inside the
+  // cellule's own edge, between its picking racks and any 'far' strip there).
+  const traveeSlot = new Map(); // number -> {x, letter, edge}
+  function placeTraveeGroup(numbers, letters, edge) {
     const perGroup = Math.ceil(numbers.length / letters.length);
     letters.forEach((letter, gi) => {
       const origin = cellOrigin.get(letter);
@@ -214,12 +227,14 @@
       if (!origin || !group.length) return;
       const width = subsOf(letter).length * AISLE_PITCH;
       const pitch = group.length > 1 ? width / (group.length - 1) : 0;
-      group.forEach((num, rank) => traveeSlot.set(num, { x: origin.x + rank * pitch, letter, special }));
+      group.forEach((num, rank) => traveeSlot.set(num, { x: origin.x + rank * pitch, letter, edge }));
     });
   }
-  placeTraveeGroup(mainNums, ["E", "F", "G", "H"], false);
-  placeTraveeGroup(secondNums, ["M", "K"], false);
-  placeTraveeGroup(specialNums, ["F", "G"], true);
+  placeTraveeGroup(jNums, ["J"], "near");
+  placeTraveeGroup(iNums, ["I"], "near");
+  placeTraveeGroup(eNums, ["E"], "far");
+  placeTraveeGroup(secondNums, ["M", "K"], "far");
+  placeTraveeGroup(specialNums, ["F", "G"], "sandwich");
 
   const traveeXZ = new Map(); // emplacement code -> {x, z}
   for (let i = 0; i < N; i++) {
@@ -229,9 +244,10 @@
     if (!slot) continue;
     const origin = cellOrigin.get(slot.letter);
     const letterIdx = m[2].charCodeAt(0) - 65;
-    const z = slot.special
-      ? origin.z + origin.depth - TRAVEE_SPECIAL_INSET - letterIdx * TRAVEE_SLOT_PITCH
-      : origin.z + origin.depth + TRAVEE_GAP + letterIdx * TRAVEE_SLOT_PITCH;
+    let z;
+    if (slot.edge === "near") z = origin.z - TRAVEE_GAP - letterIdx * TRAVEE_SLOT_PITCH;
+    else if (slot.edge === "sandwich") z = origin.z + origin.depth - TRAVEE_SPECIAL_INSET - letterIdx * TRAVEE_SLOT_PITCH;
+    else z = origin.z + origin.depth + TRAVEE_GAP + letterIdx * TRAVEE_SLOT_PITCH;
     traveeXZ.set(emplacements[i], { x: slot.x, z });
   }
 
