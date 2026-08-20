@@ -5,7 +5,7 @@
   // ---------- 1. LOAD + PARSE DATA ----------
   // emplacements.txt is a pipe/newline delimited file, fetched at runtime (not
   // embedded) so an automated job can refresh just this one small file —
-  // columns: emplacement|position|niveau|area|statut|allee|longueur|largeur|hauteur|actif|poids|typestockage
+  // columns: emplacement|position|niveau|area|statut|allee|longueur|largeur|hauteur|actif|poids|typestockage|statuttravee|dstloc
   let RAW_DATA, META;
   try {
     [RAW_DATA, META] = await Promise.all([
@@ -35,6 +35,8 @@
   const actifArr = new Uint8Array(N);
   const poidsArr = new Int32Array(N);
   const stypeArr = new Array(N);
+  const statutTraveeArr = new Array(N); // 'Libre' / 'Occupé' for BJ-E../BJ-R.. dock-lane rows, '' otherwise
+  const dstlocArr = new Array(N);
 
   for (let i = 0; i < N; i++) {
     const f = lines[i].split("|");
@@ -50,6 +52,8 @@
     actifArr[i] = parseInt(f[9], 10);
     poidsArr[i] = parseInt(f[10], 10) || 0;
     stypeArr[i] = f[11] || "NON_DEFINI";
+    statutTraveeArr[i] = f[12] || "";
+    dstlocArr[i] = f[13] || "";
   }
 
   // ---------- 2. BUILD SPATIAL LAYOUT ----------
@@ -174,6 +178,63 @@
   // special/junk locations with no allee -> put in a dedicated far corner
   const JUNK_ORIGIN = { x: -8, z: -8, depth: CELL_DEPTH, zPitch: SLOT_PITCH };
 
+  // ---------- 2b. RECEPTION/EXPEDITION DOCK LANES ("travées") ----------
+  // These rows (area BJ-TRAVEXP/BJ-TRAVREC/AU-TRAVEXP/AU-TRAVREC) carry no
+  // allee/position from the source export — the dock-lane number and pallet
+  // slot are only encoded in the emplacement code itself, e.g. "BJ-E30A" =
+  // expedition, lane 30, slot A. BJ-E and BJ-R codes name the exact same
+  // physical lanes (expedition/reception are just two WMS-side views of the
+  // same dock door), so both sides share one number -> cellule/rank mapping.
+  // A handful of codes (BJ-ED.., BJ-T01.., ANOM/AUDIT) don't fit this pattern
+  // and are left unpositioned, same as any other row with no allee.
+  const TRAVEE_RE = /^BJ-[ER](\d{2,3})([A-Z])$/;
+  const TRAVEE_MAIN_CUTOFF = 70; // lanes 1-70 face cellules E,F,G,H
+  const TRAVEE_SPECIAL_MIN = 190; // lanes 190-198: a separate strip inside F/G, between the main lanes and the picking racks
+  const TRAVEE_GAP = 2; // clearance between a cellule's outer face and its first lane
+  const TRAVEE_SLOT_PITCH = 1.3; // spacing between successive lettered pallet slots within one lane
+  const TRAVEE_SPECIAL_INSET = 1; // how far inside the cellule's edge the 190-198 strip sits
+
+  const traveeNumbers = new Set();
+  for (let i = 0; i < N; i++) {
+    const m = TRAVEE_RE.exec(emplacements[i]);
+    if (m) traveeNumbers.add(parseInt(m[1], 10));
+  }
+  const mainNums = Array.from(traveeNumbers).filter((n) => n <= TRAVEE_MAIN_CUTOFF).sort((a, b) => a - b);
+  const secondNums = Array.from(traveeNumbers).filter((n) => n > TRAVEE_MAIN_CUTOFF && n < TRAVEE_SPECIAL_MIN).sort((a, b) => a - b);
+  const specialNums = Array.from(traveeNumbers).filter((n) => n >= TRAVEE_SPECIAL_MIN).sort((a, b) => a - b);
+
+  // numbers -> cellule assigned left-to-right in physical order, spread evenly
+  // across that cellule's own footprint width so the lane strip lines up with it
+  const traveeSlot = new Map(); // number -> {x, letter, special}
+  function placeTraveeGroup(numbers, letters, special) {
+    const perGroup = Math.ceil(numbers.length / letters.length);
+    letters.forEach((letter, gi) => {
+      const origin = cellOrigin.get(letter);
+      const group = numbers.slice(gi * perGroup, (gi + 1) * perGroup);
+      if (!origin || !group.length) return;
+      const width = subsOf(letter).length * AISLE_PITCH;
+      const pitch = group.length > 1 ? width / (group.length - 1) : 0;
+      group.forEach((num, rank) => traveeSlot.set(num, { x: origin.x + rank * pitch, letter, special }));
+    });
+  }
+  placeTraveeGroup(mainNums, ["E", "F", "G", "H"], false);
+  placeTraveeGroup(secondNums, ["M", "K"], false);
+  placeTraveeGroup(specialNums, ["F", "G"], true);
+
+  const traveeXZ = new Map(); // emplacement code -> {x, z}
+  for (let i = 0; i < N; i++) {
+    const m = TRAVEE_RE.exec(emplacements[i]);
+    if (!m) continue;
+    const slot = traveeSlot.get(parseInt(m[1], 10));
+    if (!slot) continue;
+    const origin = cellOrigin.get(slot.letter);
+    const letterIdx = m[2].charCodeAt(0) - 65;
+    const z = slot.special
+      ? origin.z + origin.depth - TRAVEE_SPECIAL_INSET - letterIdx * TRAVEE_SLOT_PITCH
+      : origin.z + origin.depth + TRAVEE_GAP + letterIdx * TRAVEE_SLOT_PITCH;
+    traveeXZ.set(emplacements[i], { x: slot.x, z });
+  }
+
   // ---------- 3. COMPUTE PER-INSTANCE TRANSFORMS + COLORS ----------
   const STATUT_COLOR = {
     E: 0x2ecc71, // empty - green
@@ -181,6 +242,10 @@
     P: 0xf39c12, // partial - orange
     I: 0x9b59b6, // unknown/blocked - purple
     X: 0x7f8c8d, // fallback
+  };
+  const TRAVEE_STATUT_COLOR = {
+    Libre: 0x2ecc71, // free - green, same hue as an empty storage slot
+    "Occupé": 0xe74c3c, // occupied - red, same hue as a full storage slot
   };
   const posX = new Float32Array(N);
   const posY = new Float32Array(N);
@@ -193,8 +258,9 @@
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 
   for (let i = 0; i < N; i++) {
+    const trv = traveeXZ.get(emplacements[i]);
     const allee = alleeArr[i];
-    const origin = allee && alleeY.has(allee) ? alleeY.get(allee) : JUNK_ORIGIN;
+    const origin = trv ? { x: trv.x, z: trv.z, zPitch: 0 } : allee && alleeY.has(allee) ? alleeY.get(allee) : JUNK_ORIGIN;
     const x = origin.x;
     const y = origin.z + positionArr[i] * origin.zPitch;
     const z = niveauArr[i] * LEVEL_HEIGHT + hArr[i] / 200; // base + half height
@@ -207,7 +273,9 @@
     dimY[i] = Math.max(0.2, hArr[i] / 100);
     dimZ[i] = Math.max(0.3, lArr[i] / 100);
 
-    const c = STATUT_COLOR[statutArr[i]] || STATUT_COLOR.X;
+    const c = statutTraveeArr[i]
+      ? TRAVEE_STATUT_COLOR[statutTraveeArr[i]] || STATUT_COLOR.X
+      : STATUT_COLOR[statutArr[i]] || STATUT_COLOR.X;
     const r = ((c >> 16) & 255) / 255, g = ((c >> 8) & 255) / 255, b = (c & 255) / 255;
     colorArr[i * 3] = r;
     colorArr[i * 3 + 1] = g;
@@ -461,6 +529,10 @@
       P: document.getElementById("f-p").checked,
       I: document.getElementById("f-i").checked,
     };
+    const wantTravee = {
+      Libre: document.getElementById("f-trav-libre").checked,
+      "Occupé": document.getElementById("f-trav-occupe").checked,
+    };
     const alleeFilter = document.getElementById("f-allee").value.trim().toUpperCase();
     const showInactive = document.getElementById("f-inactive").checked;
     inactiveMesh.visible = showInactive;
@@ -477,6 +549,8 @@
       const st = statutArr[i];
       if (wantStatut.hasOwnProperty(st) && !wantStatut[st]) return false;
       if (!wantType[stypeArr[i]]) return false;
+      const ts = statutTraveeArr[i];
+      if (ts && !wantTravee[ts]) return false;
       if (alleeFilter && !alleeArr[i].toUpperCase().includes(alleeFilter)) return false;
       return true;
     }
@@ -516,12 +590,18 @@
     const alleeFilter = document.getElementById("f-allee").value.trim().toUpperCase();
     const wantType = {};
     typeCheckboxes.forEach((cb) => (wantType[cb.dataset.type] = cb.checked));
+    const wantTravee = {
+      Libre: document.getElementById("f-trav-libre").checked,
+      "Occupé": document.getElementById("f-trav-occupe").checked,
+    };
     for (let i = 0; i < N; i++) {
       const a = areaArr[i];
       if (!wantZone[a]) continue;
       const st = statutArr[i];
       if (wantStatut.hasOwnProperty(st) && !wantStatut[st]) continue;
       if (!wantType[stypeArr[i]]) continue;
+      const ts = statutTraveeArr[i];
+      if (ts && !wantTravee[ts]) continue;
       if (alleeFilter && !alleeArr[i].toUpperCase().includes(alleeFilter)) continue;
       total++;
       if (actifArr[i]) act++; else inact++;
@@ -540,7 +620,7 @@
     document.getElementById("stat-fillpct").textContent = fillPct + "%";
   }
 
-  ["f-e", "f-f", "f-p", "f-i", "f-inactive"].forEach((id) => {
+  ["f-e", "f-f", "f-p", "f-i", "f-inactive", "f-trav-libre", "f-trav-occupe"].forEach((id) => {
     document.getElementById(id).addEventListener("change", applyFilters);
   });
   zoneCheckboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -609,7 +689,9 @@
       '<div class="det-row"><b>' + emplacements[i] + "</b></div>" +
       '<div class="det-row">Allée: ' + (alleeArr[i] || "-") + " &middot; Position: " + positionArr[i] + " &middot; Niveau: " + niveauArr[i] + "</div>" +
       '<div class="det-row">Zone: ' + areaArr[i] + " &middot; Type: " + stypeArr[i] + "</div>" +
-      '<div class="det-row">Statut: ' + statutLabel(statutArr[i]) + "</div>" +
+      (statutTraveeArr[i]
+        ? '<div class="det-row">Travée: ' + statutTraveeArr[i] + "</div>"
+        : '<div class="det-row">Statut: ' + statutLabel(statutArr[i]) + "</div>") +
       '<div class="det-row">Etat: ' + (actifArr[i] ? "Actif" : "Inactif") + "</div>" +
       '<div class="det-row">Dimensions (LxlxH cm): ' + lArr[i] + " x " + wArr[i] + " x " + hArr[i] + "</div>" +
       '<div class="det-row">Poids max: ' + poidsArr[i] + " kg</div>";

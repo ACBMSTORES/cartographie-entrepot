@@ -92,9 +92,14 @@ def build():
         except (TypeError, ValueError):
             poids = 0
         stype = storage_type(r[idx["type_stockage"]]) if "type_stockage" in idx else "NON_DEFINI"
+        # Added alongside the reception/expedition travee rows: STATUT_TRAVEE
+        # ("Libre"/"Occupe") is the real occupancy signal for those rows -
+        # STATUT_EMPLACEMENT is always "E" for them and isn't meaningful.
+        statut_travee = s(r[idx["statut_travee"]]) if "statut_travee" in idx else ""
+        dstloc = s(r[idx["dstloc"]]) if "dstloc" in idx else ""
         lines.append(
             f"{emplacement}|{position}|{niveau}|{area}|{statut}|{allee}|"
-            f"{int(l)}|{int(w)}|{int(h)}|{actif}|{poids}|{stype}"
+            f"{int(l)}|{int(w)}|{int(h)}|{actif}|{poids}|{stype}|{statut_travee}|{dstloc}"
         )
 
     wb.close()  # release the file handle before moving the source file below
