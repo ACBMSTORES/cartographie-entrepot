@@ -117,6 +117,11 @@
   // J's very last emplacement (J is a tall cellule, its max position reaches
   // z = totalDepth) — rather than restarting at z = 0 like the main block.
   const DEPOT2_FRONT_Z = totalDepth - SLOT_PITCH;
+  // Per the operator's reference diagram, the second depot isn't two
+  // top/bottom pairs (N/M, K/L) — it's N alone (no cellule below it), M as
+  // its own tall column spanning the combined height of K+L, then K/L as a
+  // normal pair. M's depth is derived from K+L so it lines up with both.
+  const M_DEPTH = maxPositionOf("K") * SLOT_PITCH + ROW_GAP + maxPositionOf("L") * SLOT_PITCH;
 
   const COLUMNS = [
     { top: "A", bottom: "E" },
@@ -125,8 +130,9 @@
     { top: "D", bottom: "H" },
     { tall: "I" },
     { tall: "J" },
-    { top: "N", bottom: "M", gapBefore: DEPOT_GAP, frontZ: DEPOT2_FRONT_Z, ownDepth: true },
-    { top: "K", bottom: "L", frontZ: DEPOT2_FRONT_Z, ownDepth: true },
+    { top: "N", gapBefore: DEPOT_GAP, frontZ: DEPOT2_FRONT_Z, ownDepth: true },
+    { tall: "M", gapBefore: 0, frontZ: DEPOT2_FRONT_Z, depth: M_DEPTH },
+    { top: "K", bottom: "L", gapBefore: 0, frontZ: DEPOT2_FRONT_Z, ownDepth: true },
   ];
 
   // zPitch = meters advanced per unit of the raw "position" field. Normal
@@ -139,19 +145,27 @@
     if (idx > 0) cursorX += col.gapBefore != null ? col.gapBefore : COL_GAP;
     if (col.tall) {
       const width = Math.max(subsOf(col.tall).length, 1) * AISLE_PITCH;
-      cellOrigin.set(col.tall, { x: cursorX, z: 0, depth: totalDepth, zPitch: totalDepth / maxPosition });
+      const z = col.frontZ != null ? col.frontZ : 0;
+      const depth = col.depth != null ? col.depth : totalDepth;
+      const ownMax = col.depth != null ? maxPositionOf(col.tall) : maxPosition;
+      cellOrigin.set(col.tall, { x: cursorX, z, depth, zPitch: depth / ownMax });
       cursorX += width;
     } else if (col.ownDepth) {
-      // each cellule keeps its own true width and depth; the bottom one
-      // simply starts right after the top one's own depth ends.
+      // each cellule keeps its own true width and depth; the bottom one (if
+      // any — a column can be top-only, like N) starts right after the top
+      // one's own depth ends.
       const topDepth = maxPositionOf(col.top) * SLOT_PITCH;
-      const bottomDepth = maxPositionOf(col.bottom) * SLOT_PITCH;
       const topWidth = Math.max(subsOf(col.top).length, 1) * AISLE_PITCH;
-      const bottomWidth = Math.max(subsOf(col.bottom).length, 1) * AISLE_PITCH;
       const frontZ = col.frontZ != null ? col.frontZ : 0;
       cellOrigin.set(col.top, { x: cursorX, z: frontZ, depth: topDepth, zPitch: SLOT_PITCH });
-      cellOrigin.set(col.bottom, { x: cursorX, z: frontZ + topDepth + ROW_GAP, depth: bottomDepth, zPitch: SLOT_PITCH });
-      cursorX += Math.max(topWidth, bottomWidth);
+      let width = topWidth;
+      if (col.bottom) {
+        const bottomDepth = maxPositionOf(col.bottom) * SLOT_PITCH;
+        const bottomWidth = Math.max(subsOf(col.bottom).length, 1) * AISLE_PITCH;
+        cellOrigin.set(col.bottom, { x: cursorX, z: frontZ + topDepth + ROW_GAP, depth: bottomDepth, zPitch: SLOT_PITCH });
+        width = Math.max(topWidth, bottomWidth);
+      }
+      cursorX += width;
     } else {
       const width = Math.max(subsOf(col.top).length, subsOf(col.bottom).length, 1) * AISLE_PITCH;
       cellOrigin.set(col.top, { x: cursorX, z: rowZ[0], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
