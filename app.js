@@ -145,8 +145,12 @@
     if (idx > 0) cursorX += col.gapBefore != null ? col.gapBefore : COL_GAP;
     if (col.tall) {
       const width = Math.max(subsOf(col.tall).length, 1) * AISLE_PITCH;
-      const z = col.frontZ != null ? col.frontZ : 0;
-      const depth = col.depth != null ? col.depth : totalDepth;
+      // I and J (no frontZ/depth override) extend one row-depth past A-D's
+      // front edge, per the reference plan — their back still lines up with
+      // E-H's back. M (which does pass frontZ/depth) has no such overhang.
+      const overhang = col.frontZ == null && col.depth == null ? CELL_DEPTH : 0;
+      const z = col.frontZ != null ? col.frontZ : -overhang;
+      const depth = col.depth != null ? col.depth : totalDepth + overhang;
       const ownMax = col.depth != null ? maxPositionOf(col.tall) : maxPosition;
       cellOrigin.set(col.tall, { x: cursorX, z, depth, zPitch: depth / ownMax });
       cursorX += width;
