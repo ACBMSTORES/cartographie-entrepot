@@ -80,7 +80,7 @@
   const AISLE_PITCH = 1.2 + GAP; // meters between two adjacent aisles (based on typical 'largeur' 120cm + gap)
   const SLOT_PITCH = 0.8 + GAP; // meters between two consecutive slots along an aisle (based on typical 'longueur' 80cm + gap)
   const COL_GAP = 6; // cross-aisle gap between columns of cellules within the same depot
-  const DEPOT_GAP = 30; // 3000cm gap before the N/K/M/L block, which sits in a separate depot building
+  const DEPOT_GAP = 100; // 10000cm gap before the N/K/M/L block, which sits in a separate depot building
 
   let maxPosition = 1, maxHauteur = 1;
   for (let i = 0; i < N; i++) {
@@ -130,7 +130,7 @@
     { top: "D", bottom: "H" },
     { tall: "I" },
     { tall: "J" },
-    { top: "N", gapBefore: DEPOT_GAP, frontZ: DEPOT2_FRONT_Z, ownDepth: true },
+    { top: "N", gapBefore: DEPOT_GAP, frontZ: DEPOT2_FRONT_Z, ownDepth: true, rotated: true },
     { tall: "M", gapBefore: 0, frontZ: DEPOT2_FRONT_Z, depth: M_DEPTH },
     { top: "K", bottom: "L", gapBefore: 0, frontZ: DEPOT2_FRONT_Z, ownDepth: true },
   ];
@@ -155,21 +155,31 @@
       cellOrigin.set(col.tall, { x: cursorX, z, depth, zPitch: depth / ownMax });
       cursorX += width;
     } else if (col.ownDepth) {
-      // each cellule keeps its own true width and depth; the bottom one (if
-      // any — a column can be top-only, like N) starts right after the top
-      // one's own depth ends.
-      const topDepth = maxPositionOf(col.top) * SLOT_PITCH;
-      const topWidth = Math.max(subsOf(col.top).length, 1) * AISLE_PITCH;
       const frontZ = col.frontZ != null ? col.frontZ : 0;
-      cellOrigin.set(col.top, { x: cursorX, z: frontZ, depth: topDepth, zPitch: SLOT_PITCH });
-      let width = topWidth;
-      if (col.bottom) {
-        const bottomDepth = maxPositionOf(col.bottom) * SLOT_PITCH;
-        const bottomWidth = Math.max(subsOf(col.bottom).length, 1) * AISLE_PITCH;
-        cellOrigin.set(col.bottom, { x: cursorX, z: frontZ + topDepth + ROW_GAP, depth: bottomDepth, zPitch: SLOT_PITCH });
-        width = Math.max(topWidth, bottomWidth);
+      if (col.rotated) {
+        // N's aisles run perpendicular to every other cellule's: what's
+        // normally the X spread (aisle count) runs along Z here, and what's
+        // normally the Z depth (position count) runs along X instead.
+        const subCount = Math.max(subsOf(col.top).length, 1);
+        const posSpan = maxPositionOf(col.top) * SLOT_PITCH;
+        cellOrigin.set(col.top, { x: cursorX, z: frontZ, depth: subCount * AISLE_PITCH, zPitch: 0, posPitch: SLOT_PITCH, rotated: true });
+        cursorX += posSpan;
+      } else {
+        // each cellule keeps its own true width and depth; the bottom one
+        // (if any — a column can be top-only, like N) starts right after
+        // the top one's own depth ends.
+        const topDepth = maxPositionOf(col.top) * SLOT_PITCH;
+        const topWidth = Math.max(subsOf(col.top).length, 1) * AISLE_PITCH;
+        cellOrigin.set(col.top, { x: cursorX, z: frontZ, depth: topDepth, zPitch: SLOT_PITCH });
+        let width = topWidth;
+        if (col.bottom) {
+          const bottomDepth = maxPositionOf(col.bottom) * SLOT_PITCH;
+          const bottomWidth = Math.max(subsOf(col.bottom).length, 1) * AISLE_PITCH;
+          cellOrigin.set(col.bottom, { x: cursorX, z: frontZ + topDepth + ROW_GAP, depth: bottomDepth, zPitch: SLOT_PITCH });
+          width = Math.max(topWidth, bottomWidth);
+        }
+        cursorX += width;
       }
-      cursorX += width;
     } else {
       const width = Math.max(subsOf(col.top).length, subsOf(col.bottom).length, 1) * AISLE_PITCH;
       cellOrigin.set(col.top, { x: cursorX, z: rowZ[0], depth: CELL_DEPTH, zPitch: SLOT_PITCH });
@@ -178,6 +188,14 @@
     }
   });
 
+  // X-extent of a cellule's footprint — normally its aisle count, but for a
+  // rotated cellule (N) that's the Z-extent instead, so use its position span.
+  function widthOf(letter) {
+    const origin = cellOrigin.get(letter);
+    if (origin && origin.rotated) return maxPositionOf(letter) * SLOT_PITCH;
+    return Math.max(subsOf(letter).length, 1) * AISLE_PITCH;
+  }
+
   const CELLULE_COLOR = {
     A: "#4f86c6", B: "#7fa96b", C: "#efc94c", D: "#ef8a76",
     E: "#b39ddb", F: "#5bc8e8", G: "#e399b8", H: "#f2a73b",
@@ -185,12 +203,18 @@
     N: "#ffd166", K: "#ef476f", M: "#06d6a0", L: "#118ab2",
   };
 
-  const alleeY = new Map(); // allee code -> {x, z, depth, zPitch} origin (base of that aisle)
+  const alleeY = new Map(); // allee code -> {x, z, depth, zPitch, xPitch} origin (base of that aisle)
   blocks.forEach((subsSet, letter) => {
     const origin = cellOrigin.get(letter);
     if (!origin) return; // unexpected block letter outside the reference plan
     subsOf(letter).forEach((s, idx) => {
-      alleeY.set(letter + s, { x: origin.x + idx * AISLE_PITCH, z: origin.z, depth: origin.depth, zPitch: origin.zPitch });
+      if (origin.rotated) {
+        // aisle index spreads along Z instead of X; position moves the
+        // emplacement along X instead of Z (see the ownDepth/rotated branch).
+        alleeY.set(letter + s, { x: origin.x, z: origin.z + idx * AISLE_PITCH, zPitch: 0, xPitch: origin.posPitch });
+      } else {
+        alleeY.set(letter + s, { x: origin.x + idx * AISLE_PITCH, z: origin.z, depth: origin.depth, zPitch: origin.zPitch });
+      }
     });
   });
   // special/junk locations with no allee -> put in a dedicated far corner
@@ -320,7 +344,7 @@
     }
     const allee = alleeArr[i];
     const origin = trv ? { x: trv.x, z: trv.z, zPitch: 0 } : allee && alleeY.has(allee) ? alleeY.get(allee) : JUNK_ORIGIN;
-    const x = origin.x;
+    const x = origin.x + positionArr[i] * (origin.xPitch || 0); // non-zero only for rotated cellules (N)
     const y = origin.z + positionArr[i] * origin.zPitch;
     const z = niveauArr[i] * LEVEL_HEIGHT + hArr[i] / 200; // base + half height
 
@@ -511,7 +535,7 @@
 
   // large cellule letter, floating above each of the 10 zones
   cellOrigin.forEach((origin, letter) => {
-    const width = subsOf(letter).length * AISLE_PITCH;
+    const width = widthOf(letter);
     const cx = origin.x + width / 2;
     const cz = origin.z + origin.depth / 2;
     const sprite = makeTextSprite(letter, {
@@ -528,7 +552,9 @@
   // smaller aisle code, floating above the near end of each aisle
   alleeY.forEach((origin, code) => {
     const sprite = makeTextSprite(code, { fontPx: 90, color: "#ffe066", worldHeight: 1.5 });
-    sprite.position.set(origin.x + AISLE_PITCH / 2, maxShelfTop + 1.2, origin.z - 0.5);
+    const lx = origin.xPitch ? origin.x - 0.5 : origin.x + AISLE_PITCH / 2;
+    const lz = origin.xPitch ? origin.z + AISLE_PITCH / 2 : origin.z - 0.5;
+    sprite.position.set(lx, maxShelfTop + 1.2, lz);
     sprite.renderOrder = 1;
     labelGroup.add(sprite);
   });
@@ -822,7 +848,7 @@
       const letter = el.dataset.letter;
       const origin = cellOrigin.get(letter);
       if (!origin) return;
-      const width = subsOf(letter).length * AISLE_PITCH;
+      const width = widthOf(letter);
       const cx = origin.x + width / 2;
       const cz = origin.z + origin.depth / 2;
       const dist = Math.max(width, origin.depth) * 1.1 + 15;
