@@ -184,17 +184,24 @@
   // slot are only encoded in the emplacement code itself, e.g. "BJ-E30A" =
   // expedition, lane 30, slot A. BJ-E and BJ-R codes name the exact same
   // physical lanes (expedition/reception are just two WMS-side views of the
-  // same dock door), so both sides share one number -> cellule/rank mapping.
-  // Cellule assignment below is cross-checked against "Visual Map extension
-  // V1.xlsm" (a cell-per-slot floor plan), which only documents lanes 45-70:
-  // 56-70 sit at cellule J's near/entrance edge, 45-54 at I's (56 is missing
-  // there on purpose). Everything else (1-44 at E, 71-98 at K/M, 190-198
-  // sandwiched in F/G) comes from the operator directly, not the plan. A
-  // handful of codes (BJ-ED.., BJ-T01.., ANOM/AUDIT) don't fit the
-  // number+letter pattern at all and are left unpositioned.
+  // same dock door), so both sides share one number+letter -> lane mapping,
+  // landing on identical coordinates for any given lane.
+  //
+  // Per "Visual Map extension V1.xlsm" (a cell-per-slot floor plan): each
+  // number+letter is its own narrow lane, long enough to queue several
+  // pallets, drawn side by side with other letters of the same number (e.g.
+  // R45 alone spans 24 parallel lanes, R45X..R45A). Numbers 56-70 sit at
+  // cellule J's near/entrance edge and 45-54 at I's (that's the only range
+  // the plan documents; 56 is skipped there on purpose). Everything else
+  // (1-44 at E, 71-98 at K/M, 190-198 sandwiched in F/G) comes from the
+  // operator directly, not the plan. A handful of codes (BJ-ED.., BJ-T01..,
+  // ANOM/AUDIT) don't fit the number+letter pattern at all and are left
+  // unpositioned.
   const TRAVEE_RE = /^BJ-[ER](\d{2,3})([A-Z])$/;
-  const TRAVEE_GAP = 2; // clearance between a cellule's edge and its first lane
-  const TRAVEE_SLOT_PITCH = 1.3; // spacing between successive lettered pallet slots within one lane
+  const TRAVEE_LANE_WIDTH = 1.3; // one lane per lettered pallet queue, side by side
+  const TRAVEE_LANE_DEPTH = 13; // lane length, long enough to queue ~11 pallets
+  const TRAVEE_LANE_HEIGHT = 0.2; // flat ground marking, not a shelved pallet — matches the 0.2 floor applied to every box's height below
+  const TRAVEE_GAP = 2; // clearance between a cellule's edge and the lane row
   const TRAVEE_SPECIAL_INSET = 1; // how far inside the cellule's edge the 190-198 strip sits
 
   function range(a, b) { // inclusive
@@ -202,32 +209,42 @@
     for (let n = a; n <= b; n++) out.push(n);
     return out;
   }
-  const traveeNumbers = new Set();
+  const lettersByNumber = new Map(); // travée number -> Set(letter)
   for (let i = 0; i < N; i++) {
     const m = TRAVEE_RE.exec(emplacements[i]);
-    if (m) traveeNumbers.add(parseInt(m[1], 10));
+    if (!m) continue;
+    const num = parseInt(m[1], 10);
+    if (!lettersByNumber.has(num)) lettersByNumber.set(num, new Set());
+    lettersByNumber.get(num).add(m[2]);
   }
-  const presentOnly = (nums) => nums.filter((n) => traveeNumbers.has(n));
+  const presentOnly = (nums) => nums.filter((n) => lettersByNumber.has(n));
   const jNums = presentOnly(range(56, 70).reverse()); // 70 down to 56, at J's near edge
   const iNums = presentOnly(range(45, 54).reverse()); // 54 down to 45, at I's near edge
   const eNums = presentOnly(range(1, 44)); // all at cellule E — confirmed by operator, not the plan
   const secondNums = presentOnly(range(71, 98)); // K,M far edge — confirmed by operator, not the plan
   const specialNums = presentOnly(range(190, 198)); // sandwiched in F,G — confirmed by operator
 
-  // numbers -> cellule, spread evenly across that cellule's own footprint
-  // width so the lane strip lines up with it. edge: 'near' (I/J entrance
-  // side), 'far' (outward-facing dock wall), or 'sandwich' (just inside the
-  // cellule's own edge, between its picking racks and any 'far' strip there).
-  const traveeSlot = new Map(); // number -> {x, letter, edge}
-  function placeTraveeGroup(numbers, letters, edge) {
-    const perGroup = Math.ceil(numbers.length / letters.length);
-    letters.forEach((letter, gi) => {
-      const origin = cellOrigin.get(letter);
+  // numbers -> cellule; lanes (letters, A first) sit side by side with no
+  // gap at all, including between one number's lane group and the next —
+  // the whole numbered sequence forms one continuous strip. edge: 'near'
+  // (I/J entrance side), 'far' (outward-facing dock wall), or 'sandwich'
+  // (just inside the cellule's own edge, between its picking racks and the
+  // strip).
+  const traveeLane = new Map(); // "number|letter" -> {x, letter (cellule), edge}
+  function placeTraveeGroup(numbers, cellules, edge) {
+    const perGroup = Math.ceil(numbers.length / cellules.length);
+    cellules.forEach((celluleLetter, gi) => {
+      const origin = cellOrigin.get(celluleLetter);
       const group = numbers.slice(gi * perGroup, (gi + 1) * perGroup);
       if (!origin || !group.length) return;
-      const width = subsOf(letter).length * AISLE_PITCH;
-      const pitch = group.length > 1 ? width / (group.length - 1) : 0;
-      group.forEach((num, rank) => traveeSlot.set(num, { x: origin.x + rank * pitch, letter, edge }));
+      let cursor = 0;
+      group.forEach((num) => {
+        const laneLetters = Array.from(lettersByNumber.get(num)).sort(); // A, B, C...
+        laneLetters.forEach((letter) => {
+          traveeLane.set(num + "|" + letter, { x: origin.x + cursor + TRAVEE_LANE_WIDTH / 2, letter: celluleLetter, edge });
+          cursor += TRAVEE_LANE_WIDTH;
+        });
+      });
     });
   }
   placeTraveeGroup(jNums, ["J"], "near");
@@ -240,15 +257,14 @@
   for (let i = 0; i < N; i++) {
     const m = TRAVEE_RE.exec(emplacements[i]);
     if (!m) continue;
-    const slot = traveeSlot.get(parseInt(m[1], 10));
-    if (!slot) continue;
-    const origin = cellOrigin.get(slot.letter);
-    const letterIdx = m[2].charCodeAt(0) - 65;
+    const lane = traveeLane.get(parseInt(m[1], 10) + "|" + m[2]);
+    if (!lane) continue;
+    const origin = cellOrigin.get(lane.letter);
     let z;
-    if (slot.edge === "near") z = origin.z - TRAVEE_GAP - letterIdx * TRAVEE_SLOT_PITCH;
-    else if (slot.edge === "sandwich") z = origin.z + origin.depth - TRAVEE_SPECIAL_INSET - letterIdx * TRAVEE_SLOT_PITCH;
-    else z = origin.z + origin.depth + TRAVEE_GAP + letterIdx * TRAVEE_SLOT_PITCH;
-    traveeXZ.set(emplacements[i], { x: slot.x, z });
+    if (lane.edge === "near") z = origin.z - TRAVEE_GAP - TRAVEE_LANE_DEPTH / 2;
+    else if (lane.edge === "sandwich") z = origin.z + origin.depth - TRAVEE_SPECIAL_INSET - TRAVEE_LANE_DEPTH / 2;
+    else z = origin.z + origin.depth + TRAVEE_GAP + TRAVEE_LANE_DEPTH / 2;
+    traveeXZ.set(emplacements[i], { x: lane.x, z });
   }
 
   // ---------- 3. COMPUTE PER-INSTANCE TRANSFORMS + COLORS ----------
@@ -275,6 +291,15 @@
 
   for (let i = 0; i < N; i++) {
     const trv = traveeXZ.get(emplacements[i]);
+    // Dock lanes are flat ground markings, not shelved pallets — the source
+    // export has no real dimensions for them (a 9999999 sentinel). Overwrite
+    // l/w/h in place (not just the render-time dim arrays) so the base-height
+    // math below and the details panel both stay consistent with what's drawn.
+    if (trv) {
+      lArr[i] = TRAVEE_LANE_DEPTH * 100;
+      wArr[i] = TRAVEE_LANE_WIDTH * 100;
+      hArr[i] = TRAVEE_LANE_HEIGHT * 100;
+    }
     const allee = alleeArr[i];
     const origin = trv ? { x: trv.x, z: trv.z, zPitch: 0 } : allee && alleeY.has(allee) ? alleeY.get(allee) : JUNK_ORIGIN;
     const x = origin.x;
@@ -285,9 +310,9 @@
     posY[i] = z; // three.js Y = up
     posZ[i] = y; // three.js Z = warehouse depth
 
-    dimX[i] = Math.max(0.3, wArr[i] / 100);
+    dimX[i] = trv ? wArr[i] / 100 * 0.9 : Math.max(0.3, wArr[i] / 100);
     dimY[i] = Math.max(0.2, hArr[i] / 100);
-    dimZ[i] = Math.max(0.3, lArr[i] / 100);
+    dimZ[i] = trv ? lArr[i] / 100 * 0.95 : Math.max(0.3, lArr[i] / 100);
 
     const c = statutTraveeArr[i]
       ? TRAVEE_STATUT_COLOR[statutTraveeArr[i]] || STATUT_COLOR.X
