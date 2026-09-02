@@ -273,7 +273,7 @@
   // (just inside the cellule's own edge, between its picking racks and the
   // strip).
   const traveeLane = new Map(); // "number|letter" -> {x, letter (cellule), edge}
-  function placeTraveeGroup(numbers, cellules, edge) {
+  function placeTraveeGroup(numbers, cellules, edge, letterOrder) {
     const perGroup = Math.ceil(numbers.length / cellules.length);
     cellules.forEach((celluleLetter, gi) => {
       const origin = cellOrigin.get(celluleLetter);
@@ -281,7 +281,8 @@
       if (!origin || !group.length) return;
       let cursor = 0;
       group.forEach((num) => {
-        const laneLetters = Array.from(lettersByNumber.get(num)).sort(); // A, B, C...
+        const laneLetters = Array.from(lettersByNumber.get(num)).sort();
+        if (letterOrder === "desc") laneLetters.reverse();
         laneLetters.forEach((letter) => {
           traveeLane.set(num + "|" + letter, { x: origin.x + cursor + TRAVEE_LANE_WIDTH / 2, letter: celluleLetter, edge });
           cursor += TRAVEE_LANE_WIDTH;
@@ -292,7 +293,11 @@
   placeTraveeGroup(jNums, ["J"], "near");
   placeTraveeGroup(iNums, ["I"], "near");
   placeTraveeGroup(eNums, ["E"], "far");
-  placeTraveeGroup(secondNums, ["M", "K"], "near");
+  // M->K runs in decreasing number order, and the letters within each
+  // number follow the same decreasing direction (D before A), not A-first
+  // like the other groups — confirmed by the operator (e.g. BJ-R76D sits
+  // before BJ-R76A going from M to K).
+  placeTraveeGroup(secondNums, ["M", "K"], "near", "desc");
   placeTraveeGroup(specialNums, ["F", "G"], "sandwich");
 
   const traveeXZ = new Map(); // emplacement code -> {x, z}
