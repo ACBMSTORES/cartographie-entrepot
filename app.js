@@ -263,7 +263,7 @@
   const jNums = presentOnly(range(56, 70).reverse()); // 70 down to 56, at J's near edge
   const iNums = presentOnly(range(45, 54).reverse()); // 54 down to 45, at I's near edge
   const eNums = presentOnly(range(1, 44)); // all at cellule E — confirmed by operator, not the plan
-  const secondNums = presentOnly(range(71, 98)); // M,K near edge, facing their first emplacements — confirmed by operator, not the plan
+  const secondNums = presentOnly(range(71, 98).reverse()); // 98 down to 71, decreasing from M to K, at their near edge — confirmed by operator
   const specialNums = presentOnly(range(190, 198)); // sandwiched in F,G — confirmed by operator
 
   // numbers -> cellule; lanes (letters, A first) sit side by side with no
